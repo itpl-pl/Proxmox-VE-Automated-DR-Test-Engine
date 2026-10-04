@@ -178,14 +178,16 @@ def main():
             log(f"Uruchamiam proces pct restore dla CT {TEST_VM_ID}...")
             r_out, r_err, code = run_cmd(f"pct restore {TEST_VM_ID} {latest_backup} --storage {TARGET_STORAGE}")
 
+            # Analiza połączonego wyjścia STDOUT + STDERR
+            full_restore_log = f"{r_out}\n{r_err}"
+
             # Dynamiczne zabezpieczenie przed przepełnieniem (os error 28 / No space left on device)
-            if code != 0 and ("No space left on device" in r_err or "os error 28" in r_err):
+            if code != 0 and ("No space left on device" in full_restore_log or "os error 28" in full_restore_log):
                 log("⚠️ Wykryto brak wolnego miejsca wewnątrz wolumenu LXC (os error 28).")
                 log("Odpytuję PBS o oryginalny rozmiar dysku kontenera...")
                 
-                # 1. Odczytanie oryginalnej konfiguracji z archiwum PBS
                 cfg_out, _, cfg_code = run_cmd(f"pvesm extractconfig {latest_backup}")
-                orig_size_gb = 20  # Domyślny bezpieczny fallback
+                orig_size_gb = 25  # Bezpieczna wartość bazowa
                 
                 if cfg_code == 0:
                     size_match = re.search(r"rootfs:.*size=(\d+)([GMK])", cfg_out)
@@ -197,11 +199,10 @@ def main():
                         elif unit == 'M':
                             orig_size_gb = max(1, val // 1024)
 
-                # 2. Obliczenie nowego rozmiaru: oryginał + 25% (z gwarancją co najmniej +10 GB zapasu)
-                boosted_size_gb = max(int(orig_size_gb * 1.25), orig_size_gb + 10)
+                # Naddatek: +50% oryginalnego rozmiaru (minimum +15 GB zapasu)
+                boosted_size_gb = max(int(orig_size_gb * 1.5), orig_size_gb + 15)
                 log(f"Oryginalny rozmiar: {orig_size_gb}G. Ponawiam przywracanie z powiększonym dyskiem: {boosted_size_gb}G...")
 
-                # 3. Ponowna próba przywrócenia z dynamicznym nadpisaniem parametru rootfs
                 r_out, r_err, code = run_cmd(f"pct restore {TEST_VM_ID} {latest_backup} --storage {TARGET_STORAGE} --rootfs {TARGET_STORAGE}:{boosted_size_gb}")
 
         log(f"--- LOGI PROCESU PRZYWRACANIA PROXMOX ---\nSTDOUT:\n{r_out.strip()}\nSTDERR:\n{r_err.strip()}\n---------------------------------------")
